@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Iron Diary</title>
+<meta name="theme-color" content="#111" />
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root{--bg:#f6f7f9;--fg:#111;--muted:#666;--card:#fff;--bor:#ddd;}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+  .wrap{max-width:1000px;margin:0 auto;padding:16px}
+  h1{margin:0 0 8px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:16px}
+  .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .tab{border:1px solid var(--bor);background:#fff;border-radius:10px;padding:8px 12px;cursor:pointer}
+  .tab.active{background:#111;color:#fff;border-color:#111}
+  .card{background:var(--card);border:1px solid var(--bor);border-radius:12px;padding:12px;margin-bottom:12px}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  input,select,button{padding:8px;border:1px solid var(--bor);border-radius:8px;background:#fff}
+  button.primary{background:#111;color:#fff;border-color:#111}
+  table{width:100%;border-collapse:collapse}
+  th,td{border:1px solid var(--bor);padding:8px;text-align:center}
+  th{background:#f0f0f0}
+  .right{margin-left:auto}
+  .muted{color:var(--muted);font-size:12px}
+  #debug{display:none;margin-bottom:10px;background:#ffe9e9;border:1px solid #e55;color:#900;padding:6px;border-radius:8px;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Iron Diary</h1>
+  <div class="sub">Web app • funziona offline • dati nel browser</div>
+
+  <div id="debug"></div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="scheda">Scheda</button>
+    <button class="tab" data-tab="almanacco">Almanacco</button>
+    <button class="tab" data-tab="progressione">Progressione</button>
+    <button class="tab" data-tab="peso">Peso</button>
+    <button class="tab" data-tab="backup">Backup</button>
+  </div>
+
+  <!-- SCHEDA -->
+  <section id="scheda" class="card">
+    <div class="row" style="margin-bottom:8px">
+      <label>Data: <input type="date" id="dayDate"></label>
+      <div class="row">
+        <span class="muted">Settimana:</span>
+        <button id="wkPrev">◀</button>
+        <b id="wkNum" style="padding:0 8px">1</b>
+        <button id="wkNext">▶</button>
+        <span class="muted">Percentuale: <b id="wkPct">80%</b></span>
+      </div>
+      <span class="right muted">Aggiungi esercizi dall'Almanacco o dal menu rapido</span>
+    </div>
+    <div class="row" style="margin-bottom:8px">
+      <select id="quickAdd"></select>
+      <button class="primary" id="btnAdd">Aggiungi alla scheda</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Esercizio</th><th>1RM</th><th>%</th><th>Kg previsto</th>
+          <th>Reps previste</th><th>Kg reale</th><th>Reps reali</th><th>Elimina</th>
+        </tr>
+      </thead>
+      <tbody id="sessionBody"></tbody>
+    </table>
+  </section>
+
+  <!-- ALMANACCO -->
+  <section id="almanacco" class="card" style="display:none">
+    <div class="row"><b>Almanacco esercizi</b><span class="muted">Imposta 1RM e aggiungi alla scheda</span></div>
+    <div id="almanaccoList"></div>
+  </section>
+
+  <!-- PROGRESSIONE -->
+  <section id="progressione" class="card" style="display:none">
+    <div class="row"><b>Progressione 6 settimane</b></div>
+    <table>
+      <thead><tr><th>Settimana</th><th>Percentuale</th><th>Schema</th></tr></thead>
+      <tbody id="progBody"></tbody>
+    </table>
+  </section>
+
+  <!-- PESO -->
+  <section id="peso" class="card" style="display:none">
+    <div class="row"><b>Peso corporeo</b></div>
+    <div class="row" style="margin:8px 0">
+      <input type="date" id="bwDate"><input type="number" id="bwKg" placeholder="kg" style="width:120px">
+      <button class="primary" id="bwAdd">Aggiungi</button>
+    </div>
+    <table>
+      <thead><tr><th>Data</th><th>Peso (kg)</th><th>Elimina</th></tr></thead>
+      <tbody id="bwBody"></tbody>
+    </table>
+  </section>
+
+  <!-- BACKUP -->
+  <section id="backup" class="card" style="display:none">
+    <div class="row"><b>Backup & Ripristino</b></div>
+    <div class="row" style="margin:8px 0">
+      <button class="primary" id="btnExport">Esporta JSON</button>
+      <label><input type="file" id="importFile" accept="application/json"> Importa JSON</label>
+      <span class="muted">I dati sono salvati in LocalStorage</span>
+    </div>
+  </section>
+</div>
+
+<script>
+// ——— DEBUG errori a schermo
+window.onerror = function(msg, src, line, col, err){
+  var box = document.getElementById('debug');
+  box.style.display = 'block';
+  box.textContent = 'ERRORE:\\n' + msg + '\\n' + (src||'') + ':' + (line||'') + ':' + (col||'');
+};
+
+// ——— Dati base
+var GROUPS=['Petto','Schiena','Spalle','Gambe','Core'];
+var ALMANAC=[
+ {id:'bench_bb',name:'Panca piana bilanciere',group:'Petto'},
+ {id:'military_bb',name:'Military press bilanciere',group:'Spalle'},
+ {id:'pullup_neutral',name:'Trazioni presa neutra',group:'Schiena'},
+ {id:'dips_weighted',name:'Dips zavorrate',group:'Petto'},
+ {id:'sldl',name:'Stacco a gambe tese',group:'Gambe'},
+ {id:'laterals',name:'Alzate laterali',group:'Spalle'},
+ {id:'lat_machine',name:'Lat machine',group:'Schiena'},
+ {id:'leg_ext',name:'Leg extension',group:'Gambe'},
+ {id:'leg_curl',name:'Leg curl',group:'Gambe'},
+ {id:'back_squat',name:'Back squat',group:'Gambe'}
+];
+var DEFAULT_1RM={}; ALMANAC.forEach(e=>DEFAULT_1RM[e.id]=100);
+var PROGRESSION=[
+ {week:1,percent:80,scheme:'6x6'},
+ {week:2,percent:82,scheme:'1x6 + 5x6'},
+ {week:3,percent:84,scheme:'2x6 + 4x6'},
+ {week:4,percent:86,scheme:'3x6 + 3x6'},
+ {week:5,percent:88,scheme:'4x6 + 2x6'},
+ {week:6,percent:90,scheme:'5x6 + 1x6'},
+];
+
+// ——— Storage
+var KEY='iron-diary-store-web';
+function loadStore(){ try{
+  var raw=localStorage.getItem(KEY);
+  if(!raw) return {oneRMs: {...DEFAULT_1RM}, sessions:[], bodyweight:[], progression:[...PROGRESSION]};
+  var s=JSON.parse(raw);
+  return {oneRMs:{...DEFAULT_1RM,...(s.oneRMs||{})},sessions:s.sessions||[],bodyweight:s.bodyweight||[],progression:s.progression||PROGRESSION};
+}catch(e){ return {oneRMs:{...DEFAULT_1RM}, sessions:[], bodyweight:[], progression:[...PROGRESSION]};}}
+function saveStore(){ localStorage.setItem(KEY, JSON.stringify(STORE)); }
+var STORE=loadStore();
+
+// ——— Utils
+function $(q){return document.querySelector(q)}
+function $$(q){return Array.from(document.querySelectorAll(q))}
+function today(){return new Date().toISOString().slice(0,10)}
+function round1(x){return Math.round(x*10)/10}
+function calc(oneRM,pct){return round1((oneRM||0)*(pct||0)/100)}
+function uid(){return 'id_'+Math.random().toString(36).slice(2,10)}
+
+// ——— Tabs
+$$('.tab').forEach(btn=>btn.addEventListener('click',()=>{
+  $$('.tab').forEach(b=>b.classList.remove('active')); btn.classList.add('active');
+  var id=btn.dataset.tab; $$('section.card').forEach(s=>s.style.display='none'); $('#'+id).style.display='block';
+  if(id==='peso'){ renderBW(); }
+}));
+
+// ——— Scheda
+var selectedWeek=1;
+function refreshWeek(){
+  $('#wkNum').textContent=selectedWeek;
+  var pct=(STORE.progression.find(w=>w.week===selectedWeek)||{percent:80}).percent;
+  $('#wkPct').textContent=pct+'%';
+}
+function sessionFor(date){return STORE.sessions.find(s=>s.date===date)||{date,items:[]}}
+function upsertSession(sess){var i=STORE.sessions.findIndex(s=>s.date===sess.date); if(i===-1)STORE.sessions.push(sess); else STORE.sessions[i]=sess; saveStore();}
+function addExerciseToSession(exId){
+  var date=$('#dayDate').value; var sess=sessionFor(date);
+  var w=STORE.progression.find(w=>w.week===selectedWeek)||{percent:80,scheme:''};
+  sess.items.push({id:uid(),exerciseId:exId,percent:w.percent,plannedReps:w.scheme,actualKg:null,actualReps:null});
+  upsertSession(sess); renderSession();
+}
+function removeRow(rowId){var date=$('#dayDate').value; var s=sessionFor(date); s.items=s.items.filter(i=>i.id!==rowId); upsertSession(s); renderSession();}
+function setRow(rowId,patch){var s=sessionFor($('#dayDate').value); s.items=s.items.map(i=>i.id===rowId?{...i,...patch}:i); upsertSession(s); renderSession(false);}
+function renderSession(refreshAll=true){
+  if(refreshAll) refreshWeek();
+  var s=sessionFor($('#dayDate').value), tb=$('#sessionBody'); tb.innerHTML='';
+  if(!s.items.length){ tb.innerHTML='<tr><td colspan="8" class="muted">Aggiungi un esercizio dall\'alto o dall\'Almanacco</td></tr>'; return; }
+  s.items.forEach(row=>{
+    var ex=ALMANAC.find(a=>a.id===row.exerciseId), oneRM=STORE.oneRMs[row.exerciseId]||100, pred=calc(oneRM,row.percent);
+    var tr=document.createElement('tr');
+    tr.innerHTML = `
+      <td style="text-align:left">${ex?ex.name:row.exerciseId}</td>
+      <td><input type="number" value="${oneRM}" style="width:90px"></td>
+      <td><input type="number" value="${row.percent}" style="width:80px"></td>
+      <td><b>${pred}</b></td>
+      <td><input type="text" value="${row.plannedReps||''}" style="width:100px"></td>
+      <td><input type="number" value="${row.actualKg??''}" style="width:90px"></td>
+      <td><input type="number" value="${row.actualReps??''}" style="width:90px"></td>
+      <td><button>🗑️</button></td>`;
+    var ins=tr.querySelectorAll('input'), del=tr.querySelector('button');
+    ins[0].oninput=()=>{STORE.oneRMs[row.exerciseId]=Number(ins[0].value||0); saveStore(); renderSession(false);}
+    ins[1].oninput=()=>setRow(row.id,{percent:Number(ins[1].value||0)});
+    ins[2].oninput=()=>setRow(row.id,{plannedReps:ins[2].value});
+    ins[3].oninput=()=>setRow(row.id,{actualKg:Number(ins[3].value||0)});
+    ins[4].oninput=()=>setRow(row.id,{actualReps:Number(ins[4].value||0)});
+    del.onclick=()=>removeRow(row.id);
+    tb.appendChild(tr);
+  });
+}
+document.addEventListener('change',(e)=>{ if(e.target && e.target.id==='dayDate') renderSession(); });
+function initScheda(){
+  var d=new Date(); var iso=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,10);
+  $('#dayDate').value=iso;
+  $('#wkPrev').onclick=()=>{ if(selectedWeek>1){selectedWeek--; refreshWeek(); renderSession();} };
+  $('#wkNext').onclick=()=>{ if(selectedWeek<6){selectedWeek++; refreshWeek(); renderSession();} };
+  var sel=$('#quickAdd'); sel.innerHTML='<option value="">– scegli esercizio –</option>' + GROUPS.map(g=>{
+    var opts=ALMANAC.filter(a=>a.group===g).map(a=>`<option value="${a.id}">${a.name}</option>`).join('');
+    return `<optgroup label="${g}">${opts}</optgroup>`;
+  }).join('');
+  $('#btnAdd').onclick=()=>{ var ex=sel.value; if(!ex) return alert('Scegli un esercizio'); addExerciseToSession(ex); };
+  refreshWeek(); renderSession();
+}
+
+// ——— Almanacco
+function renderAlmanacco(){
+  var root=$('#almanaccoList'); root.innerHTML='';
+  GROUPS.forEach(g=>{
+    var box=document.createElement('div'); box.className='card';
+    box.innerHTML=`<b>${g}</b>`;
+    ALMANAC.filter(a=>a.group===g).forEach(ex=>{
+      var row=document.createElement('div'); row.className='row'; row.style.margin='6px 0';
+      row.innerHTML = `<div class="right" style="margin-right:auto">${ex.name}</div>
+        <span class="muted">1RM</span><input type="number" style="width:100px" value="${STORE.oneRMs[ex.id]||100}">
+        <button class="primary">Aggiungi</button>`;
+      var inp=row.querySelector('input'), btn=row.querySelector('button');
+      inp.oninput=()=>{ STORE.oneRMs[ex.id]=Number(inp.value||0); saveStore(); };
+      btn.onclick=()=> addExerciseToSession(ex.id);
+      box.appendChild(row);
+    });
+    root.appendChild(box);
+  });
+}
+
+// ——— Progressione
+function renderProgressione(){
+  var tb=$('#progBody'); tb.innerHTML='';
+  STORE.progression.forEach((w,idx)=>{
+    var tr=document.createElement('tr');
+    tr.innerHTML=`<td>${w.week}</td>
+      <td><input type="number" value="${w.percent}" style="width:90px"></td>
+      <td><input type="text" value="${w.scheme}" style="width:220px"></td>`;
+    var ins=tr.querySelectorAll('input');
+    ins[0].oninput=()=>{ STORE.progression[idx].percent=Number(ins[0].value||0); saveStore(); refreshWeek(); renderSession(false); };
+    ins[1].oninput=()=>{ STORE.progression[idx].scheme=ins[1].value; saveStore(); renderSession(false); };
+    tb.appendChild(tr);
+  });
+}
+
+// ——— Peso
+function renderBW(){
+  var tb=$('#bwBody'); tb.innerHTML='';
+  STORE.bodyweight.sort((a,b)=>a.date.localeCompare(b.date)).forEach(entry=>{
+    var tr=document.createElement('tr');
+    tr.innerHTML=`<td>${entry.date}</td><td>${entry.weight}</td><td><button>🗑️</button></td>`;
+    tr.querySelector('button').onclick=()=>{ STORE.bodyweight=STORE.bodyweight.filter(b=>!(b.date===entry.date && b.weight===entry.weight)); saveStore(); renderBW(); };
+    tb.appendChild(tr);
+  });
+}
+document.addEventListener('DOMContentLoaded',()=>{
+  $('#bwDate').value=today();
+  $('#bwAdd').onclick=()=>{ var d=$('#bwDate').value||today(), w=Number($('#bwKg').value||0); if(!w) return; STORE.bodyweight=[...STORE.bodyweight.filter(b=>b.date!==d),{date:d,weight:w}]; saveStore(); $('#bwKg').value=''; renderBW(); };
+});
+
+// ——— Init
+function initAll(){
+  // tabs default
+  $$('.tab').forEach(b=>b.classList.remove('active')); document.querySelector('.tab[data-tab="scheda"]').classList.add('active');
+  $$('section.card').forEach(s=>s.style.display='none'); $('#scheda').style.display='block';
+  initScheda(); renderAlmanacco(); renderProgressione();
+}
+initAll();
+
+// ——— Service Worker
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=> navigator.serviceWorker.register('./sw.js').catch(console.error));
+}
+</script>
+</body>
+</html>
